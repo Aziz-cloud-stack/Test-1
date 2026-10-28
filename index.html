@@ -26,11 +26,10 @@ svg.focus .band:not(.on),svg.focus .label:not(.on){opacity:.35}
 <div id="readout" aria-live="polite"></div>
 <p class="hint">Hover or tap a band</p>
 </main>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
 // Numbers used if numbers.xlsx can't be read. Top of the diamond first.
 const FALLBACK = [20, 40, 80, 80, 40, 20];
-const DATA_FILE = "numbers.xlsx";
+const DATA_FILE = "numbers.csv";
 
 const f = (n) => n.toFixed(1);
 function diamondSvg(COUNTS) {
@@ -121,19 +120,18 @@ function draw(COUNTS) {
   }
 }
 
-// Read the numbers from numbers.xlsx: every positive number in column B, top to bottom.
+// Read the numbers from numbers.csv: every positive number in the second column, top to bottom.
 async function loadNumbers() {
   try {
-    if (typeof XLSX === "undefined") return null;
     const res = await fetch(DATA_FILE + "?v=" + Date.now(), { cache: "no-store" });
     if (!res.ok) return null;
-    const wb = XLSX.read(await res.arrayBuffer(), { type: "array" });
-    const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, raw: true });
+    const text = (await res.text()).replace(/^\uFEFF/, "");
     const nums = [];
-    for (const r of rows) {
-      const v = Number(String(r[1] ?? "").replace(/,/g, ""));
-      if (String(r[0] ?? "").trim().toLowerCase() === "total") continue;
-      if (isFinite(v) && v > 0) nums.push(v);
+    for (const line of text.split(/\r?\n/)) {
+      const cells = line.split(/[,;\t]/).map((c) => c.trim().replace(/^"|"$/g, ""));
+      if (cells.length < 2 || cells[0].toLowerCase() === "total") continue;
+      const v = Number(cells[1]);
+      if (cells[1] !== "" && isFinite(v) && v > 0) nums.push(v);
     }
     return nums.length ? nums : null;
   } catch { return null; }

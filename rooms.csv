@@ -1,0 +1,29 @@
+room,item,quantity,unit,unit_price_sar
+Structure,Foundation concrete,85,m3,450
+Structure,Reinforcement steel,14,t,3200
+Structure,Columns and beams,40,m3,520
+Structure,Block walls,420,m2,95
+Structure,Roof slab,190,m2,310
+Living room,Porcelain floor tiles,63,m2,180
+Living room,Wall plaster and paint,110,m2,45
+Living room,Gypsum ceiling,63,m2,85
+Living room,Windows (double glazed),4,pcs,2800
+Living room,Lighting and electrics,1,set,9500
+Kitchen,Floor tiles,49,m2,160
+Kitchen,Cabinets,9,m,2400
+Kitchen,Quartz countertop,7,m,1350
+Kitchen,Appliances,1,set,26000
+Kitchen,Wall tiles,22,m2,140
+Guest bathroom,Floor and wall tiles,38,m2,170
+Guest bathroom,Sanitary ware,1,set,7800
+Guest bathroom,Plumbing,1,set,5200
+Master bedroom,Wood flooring,96,m2,210
+Master bedroom,Wall plaster and paint,120,m2,45
+Master bedroom,Built-in wardrobe,4,m,3100
+Master bedroom,Windows (double glazed),3,pcs,2800
+Bedroom 2,Wood flooring,56,m2,210
+Bedroom 2,Wall plaster and paint,86,m2,45
+Bedroom 2,Built-in wardrobe,2.5,m,3100
+Bathroom,Floor and wall tiles,46,m2,170
+Bathroom,Bathtub and sanitary ware,1,set,12500
+Bathroom,Plumbing,1,set,6100

@@ -1,6 +1,0 @@
-setting,value
-usd_to_sar,"=GOOGLEFINANCE(""CURRENCY:USDSAR"")"
-stock_label,Lennar (LEN)
-stock_price,"=GOOGLEFINANCE(""NYSE:LEN"",""price"")"
-stock_change_pct,"=GOOGLEFINANCE(""NYSE:LEN"",""changepct"")"
-villas_per_quarter,50

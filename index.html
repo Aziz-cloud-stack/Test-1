@@ -581,113 +581,6 @@ wash(2, 0.06, -0.32, Math.PI, roomGroups["Living room"], 1.3, 3.0); wash(12.5, 0
 for (const [x, z] of [[10, D + CANT + 0.32], [13.5, D + CANT + 0.32]]) { /* balcony soffit glow */ const p = new THREE.Mesh(new THREE.PlaneGeometry(0.2, 0.2), M.warmGlow); p.rotation.x = Math.PI / 2; p.position.set(x, FH - 0.01, z - 1.2); outside.add(p); }
 for (let i = 0; i < 6; i++) { const bx = -0.8, bz = D + 1 + i * 1.6; cyl(0.06, 0.06, 0.5, M.frame, bx + 18.2, 0.25, bz - 1, outside, 8); ball(0.05, M.warmGlow, bx + 18.2, 0.52, bz - 1, outside).castShadow = false; }
 
-// =====================================================================
-// People: seated and standing figures that turn to each other and talk
-// =====================================================================
-const SKIN = [0xc68e6a, 0xe0b090, 0x8d5a3c, 0xf1c9a5, 0xb07a55, 0xd9a47f, 0x7a4a30];
-function person(o) {
-  const mm = (h) => std(h, { roughness: 0.85, map: TEX.fabric });
-  const skin = std(o.skin, { roughness: 0.6 }), top = mm(o.top), bottom = mm(o.bottom), hair = std(o.hair, { roughness: 0.7 }), shoe = std(0x2b2523);
-  const g = new THREE.Group();
-  const seat = o.seat ?? 0, hipY = o.stand ? 0.95 : seat + 0.08;
-  // legs
-  for (const s of [-1, 1]) {
-    if (o.stand) {
-      cyl(0.075, 0.06, 0.48, bottom, s * 0.1, hipY - 0.24, 0, g, 10); cyl(0.055, 0.045, 0.45, bottom, s * 0.1, hipY - 0.7, 0, g, 10);
-      box(0.1, 0.07, 0.25, shoe, s * 0.1, 0.035, 0.05, g, { round: 0.03 });
-    } else {
-      const th = cyl(0.075, 0.065, 0.44, bottom, s * 0.1, hipY, 0.2, g, 10); th.rotation.x = Math.PI / 2;
-      cyl(0.055, 0.045, seat + 0.02, bottom, s * 0.1, (hipY) / 2, 0.42, g, 10);
-      box(0.1, 0.07, 0.25, shoe, s * 0.1, 0.035, 0.47, g, { round: 0.03 });
-    }
-  }
-  box(0.32, 0.16, 0.22, bottom, 0, hipY, 0, g, { round: 0.07 });
-  // torso, shoulders, neck, head
-  const torso = new THREE.Group(); torso.position.y = hipY + 0.06; g.add(torso);
-  const chest = cyl(0.17, 0.14, 0.5, top, 0, 0.25, 0, torso, 14); chest.scale.z = 0.72;
-  ball(0.07, top, -0.17, 0.47, 0, torso).scale.set(1, 0.8, 1); ball(0.07, top, 0.17, 0.47, 0, torso).scale.set(1, 0.8, 1);
-  cyl(0.045, 0.05, 0.08, skin, 0, 0.53, 0, torso, 10);
-  const head = new THREE.Group(); head.position.y = 0.58; torso.add(head);
-  const skull = ball(0.105, skin, 0, 0.1, 0.005, head); skull.scale.set(0.92, 1.12, 1);
-  ball(0.03, skin, 0, 0.085, 0.1, head).scale.set(0.6, 0.9, 0.7);                          // nose
-  const hairCap = new THREE.Mesh(new THREE.SphereGeometry(0.112, 20, 12, 0, Math.PI * 2, 0, Math.PI * 0.55), hair);
-  hairCap.position.set(0, 0.115, -0.008); hairCap.scale.set(0.95, 1.1, 1.05); hairCap.rotation.x = -0.25; head.add(hairCap);
-  if (o.long) { const h2 = box(0.2, 0.28, 0.08, hair, 0, 0.02, -0.07, head, { round: 0.04 }); h2.castShadow = true; }
-  for (const s of [-1, 1]) { const e = ball(0.012, std(0x1b1b1b), s * 0.035, 0.115, 0.095, head); e.castShadow = false; }
-  // arms with shoulder and elbow joints for gestures
-  const arms = [-1, 1].map((s) => {
-    const sh = new THREE.Group(); sh.position.set(s * 0.21, 0.45, 0); torso.add(sh);
-    cyl(0.045, 0.04, 0.28, top, 0, -0.14, 0, sh, 10);
-    const el = new THREE.Group(); el.position.y = -0.28; sh.add(el);
-    cyl(0.038, 0.032, 0.25, skin, 0, -0.125, 0, el, 10);
-    ball(0.042, skin, 0, -0.27, 0, el);
-    sh.rotation.z = s * 0.12;
-    return { sh, el };
-  });
-  // resting pose: hands on the lap when seated, at the sides when standing
-  arms.forEach((a, i) => { a.sh.rotation.x = o.stand ? -0.15 : -0.35; a.el.rotation.x = o.stand ? -0.5 : -1.15; });
-  g.traverse((m) => { if (m.isMesh) m.castShadow = true; });
-  return { g, head, torso, arms, phase: Math.random() * 10 };
-}
-// speech bubble with animated dots
-function bubbleTex(n) {
-  return canvasTex(128, (g, s) => {
-    g.clearRect(0, 0, s, s);
-    g.fillStyle = "rgba(255,255,255,.95)"; g.beginPath(); g.moveTo(24, 20); g.arcTo(116, 20, 116, 84, 18); g.arcTo(116, 84, 12, 84, 18); g.lineTo(48, 84); g.lineTo(34, 104); g.lineTo(38, 84); g.arcTo(12, 84, 12, 20, 18); g.arcTo(12, 20, 116, 20, 18); g.fill();
-    for (let i = 0; i < 3; i++) { g.fillStyle = i < n ? "#6d28d9" : "#d6ccf2"; g.beginPath(); g.arc(42 + i * 22, 52, 8, 0, Math.PI * 2); g.fill(); }
-  });
-}
-const BUBBLES = [1, 2, 3].map(bubbleTex);
-const people = [], chats = [];
-function seat(o, x, y, z, ry, parent) { const p = person(o); p.g.position.set(x, y, z); p.g.rotation.y = ry; parent.add(p.g); people.push(p); return p; }
-function chat(a, b) {
-  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: BUBBLES[0], depthTest: false, transparent: true }));
-  s.scale.set(0.42, 0.42, 1); s.renderOrder = 10; s.visible = false;
-  a.g.parent.add(s);
-  chats.push({ a, b, talker: 0, until: 0, s });
-}
-const LR = roomGroups["Living room"], KI = roomGroups["Kitchen"], FL = 0.34;
-// two on the sofa, two at the dining table, one cooking in the kitchen, two out on the deck
-const p1 = seat({ skin: SKIN[0], top: 0x5b6f8a, bottom: 0x2e3440, hair: 0x1d1611, seat: 0.42 }, 3.4, FL, 8.45, Math.PI - 0.35, LR);
-const p2 = seat({ skin: SKIN[3], top: 0xd8b4a0, bottom: 0x47423d, hair: 0x5a3a22, long: true, seat: 0.42 }, 1.95, FL, 7.0, Math.PI / 2 + 0.25, LR);
-const p3 = seat({ skin: SKIN[2], top: 0xe9e4da, bottom: 0x3a4a5e, hair: 0x111111, seat: 0.47 }, 5.9, FL, 9.85, 0, LR);
-const p4 = seat({ skin: SKIN[5], top: 0x8a3b3b, bottom: 0x2d2d2d, hair: 0x2a1b12, long: true, seat: 0.47 }, 7.3, FL, 11.35, Math.PI, LR);
-const p5 = seat({ skin: SKIN[1], top: 0x7c8b6a, bottom: 0x403a34, hair: 0x3b2a1e, stand: true }, 12.0, FL, 3.2, 0.2, KI);
-const p6 = seat({ skin: SKIN[4], top: 0xf2efe8, bottom: 0xc6b9a3, hair: 0x1a1410, seat: 0.5 }, -1.0, 0, 1.45, Math.PI, lounge);
-const p7 = seat({ skin: SKIN[6], top: 0x2f4858, bottom: 0xe8e1d4, hair: 0x0e0b09, long: true, seat: 0.5 }, -2.55, 0, -0.2, Math.PI / 2, lounge);
-chat(p1, p2); chat(p3, p4); chat(p6, p7);
-
-function animatePeople(t, dt) {
-  const look = new THREE.Vector3(), here = new THREE.Vector3(), q = new THREE.Quaternion(), e = new THREE.Euler();
-  for (const c of chats) {
-    if (t > c.until) { c.talker = Math.random() < 0.55 ? 1 - c.talker : c.talker; c.until = t + 2.5 + Math.random() * 3.5; }
-    const [sp, li] = c.talker ? [c.b, c.a] : [c.a, c.b];
-    for (const [p, other, speaking] of [[sp, li, true], [li, sp, false]]) {
-      // turn the head toward the other person (limited, like a real neck)
-      other.head.getWorldPosition(look); p.head.getWorldPosition(here);
-      p.g.getWorldQuaternion(q);
-      const dir = look.sub(here).applyQuaternion(q.invert());
-      const yaw = THREE.MathUtils.clamp(Math.atan2(dir.x, dir.z), -1.1, 1.1);
-      p.head.rotation.y += (yaw - p.head.rotation.y) * Math.min(1, dt * 3);
-      p.head.rotation.x = speaking ? Math.sin(t * 7 + p.phase) * 0.05 : Math.sin(t * 1.6 + p.phase) * 0.08 - 0.03;
-      p.torso.rotation.y = p.head.rotation.y * 0.25;
-      const arm = p.arms[1];
-      const restX = p === p5 ? -0.15 : -0.35, restE = p === p5 ? -0.5 : -1.15;
-      const gx = speaking ? restX - 0.35 + Math.sin(t * 2.3 + p.phase) * 0.3 : restX;
-      const ge = speaking ? restE - 0.35 + Math.sin(t * 3.1 + p.phase) * 0.35 : restE;
-      arm.sh.rotation.x += (gx - arm.sh.rotation.x) * Math.min(1, dt * 4);
-      arm.el.rotation.x += (ge - arm.el.rotation.x) * Math.min(1, dt * 4);
-    }
-    // the bubble floats above whoever is talking
-    sp.head.getWorldPosition(here); c.s.parent.worldToLocal(here);
-    c.s.position.copy(here).add(new THREE.Vector3(0, 0.42, 0));
-    c.s.material.map = BUBBLES[Math.floor(t * 2.5) % 3];
-    c.s.visible = c.a.g.parent.visible && isShown(c.a.g);
-  }
-  for (const p of people) p.torso.scale.y = 1 + Math.sin(t * 1.7 + p.phase) * 0.008;   // breathing
-  // the cook stirs at the hob
-  p5.arms[0].el.rotation.x = -1.3 + Math.sin(t * 4) * 0.25;
-}
 function isShown(o) { while (o) { if (!o.visible) return false; o = o.parent; } return true; }
 
 // =====================================================================
@@ -787,7 +680,6 @@ function tick() {
   if (flying) { camera.position.lerp(goal.pos, 0.07); controls.target.lerp(goal.target, 0.07); if (camera.position.distanceTo(goal.pos) < 0.05) flying = 0; }
   TEX.water.offset.set(t * 0.012, t * 0.008);
   lanternLight.intensity = 0.85 + Math.sin(t * 9) * 0.05 + Math.sin(t * 23) * 0.03;
-  animatePeople(t, dt);
   controls.update();
   renderer.render(scene, camera);
   requestAnimationFrame(tick);

@@ -4,3 +4,9 @@ cement_tonnes_per_villa,40
 steel_tonnes_per_villa,12
 bricks_thousand_per_villa,18
 glass_m2_per_villa,60
+cement_usd_per_tonne,60
+steel_usd_per_tonne,700
+bricks_usd_per_thousand,120
+glass_usd_per_m2,40
+usd_to_sar,3.75
+live_sheet_url,

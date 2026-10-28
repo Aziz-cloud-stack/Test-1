@@ -27,7 +27,7 @@ svg{width:100%;min-width:640px;height:auto;display:block}
 .hot:hover{filter:brightness(1.08)}
 #info{min-height:44px;margin:0;padding:10px 14px;border-radius:10px;background:var(--soft);color:var(--ink);font-size:14px}
 #info b{color:var(--accent)}
-.materials{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px}
+.materials{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
 .mat{border:1px solid var(--line);border-radius:10px;padding:10px 12px;display:grid;gap:6px}
 .mat .name{font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
 .mat .val{font-size:20px;font-weight:700;font-variant-numeric:tabular-nums}
@@ -35,6 +35,10 @@ svg{width:100%;min-width:640px;height:auto;display:block}
 .bar{height:6px;border-radius:3px;background:var(--soft);overflow:hidden}
 .bar i{display:block;height:100%;background:linear-gradient(90deg,#c084fc,#6d28d9);width:0}
 .note{margin:0;color:var(--muted);font-size:12px}
+.mat .sub{font-size:12px;color:var(--muted)}
+.mat.cost{background:var(--soft);border-color:#d8c8fb}
+.tag{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;padding:1px 6px;border-radius:999px;background:#ede9fe;color:#6d28d9;margin-left:4px}
+.tag.live{background:#dcfce7;color:#15803d}
 </style>
 </head>
 <body>
@@ -52,7 +56,7 @@ svg{width:100%;min-width:640px;height:auto;display:block}
   <div class="stage"><svg id="scene" role="img" aria-label="A villa factory: hoppers of cement, steel, bricks and glass feed four machines on a conveyor (foundation, structure, walls and roof, finishing). Finished villas fill a neighbourhood plot, 50 per quarter."></svg></div>
   <p id="info">Hover a machine or a hopper to see what it does.</p>
   <div class="materials" id="materials"></div>
-  <p class="note">Dummy figures for illustration. Change them in numbers.csv.</p>
+  <p class="note">Dummy figures for illustration. Change them in numbers.csv, or link a live Google Sheet.</p>
 </main>
 <script>
 // ---------- settings (overridden by numbers.csv) ----------
@@ -62,14 +66,24 @@ const DEFAULTS = {
   steel_tonnes_per_villa: 12,
   bricks_thousand_per_villa: 18,
   glass_m2_per_villa: 60,
+  // dummy prices in US dollars, converted to riyals with usd_to_sar
+  cement_usd_per_tonne: 60,
+  steel_usd_per_tonne: 700,
+  bricks_usd_per_thousand: 120,
+  glass_usd_per_m2: 40,
+  usd_to_sar: 3.75,
+  stock_price: "",
+  stock_change_pct: "",
 };
-let CFG = { ...DEFAULTS };
+const TEXT_KEYS = { stock_label: "Developer share", live_sheet_url: "" };
+let LIVE = { rate: false, stock: false, at: null };
+let CFG = { ...DEFAULTS, ...TEXT_KEYS };
 
 const MATERIALS = [
-  { key: "cement_tonnes_per_villa", name: "Cement", unit: "t", stage: 0, color: "#b9a7d9" },
-  { key: "steel_tonnes_per_villa", name: "Steel", unit: "t", stage: 1, color: "#8b7fa8" },
-  { key: "bricks_thousand_per_villa", name: "Bricks", unit: "k", stage: 2, color: "#c084fc" },
-  { key: "glass_m2_per_villa", name: "Glass", unit: "m²", stage: 3, color: "#a5d8ff" },
+  { key: "cement_tonnes_per_villa", price: "cement_usd_per_tonne", name: "Cement", unit: "t", stage: 0, color: "#b9a7d9" },
+  { key: "steel_tonnes_per_villa", price: "steel_usd_per_tonne", name: "Steel", unit: "t", stage: 1, color: "#8b7fa8" },
+  { key: "bricks_thousand_per_villa", price: "bricks_usd_per_thousand", name: "Bricks", unit: "k", stage: 2, color: "#c084fc" },
+  { key: "glass_m2_per_villa", price: "glass_usd_per_m2", name: "Glass", unit: "m²", stage: 3, color: "#a5d8ff" },
 ];
 const STAGES = [
   { name: "Foundation", text: "pours the concrete slab and footings" },
@@ -155,7 +169,7 @@ function buildScene() {
   const rows = Math.ceil(lotsN / LOT.cols);
   const groundX1 = LOT.x + LOT.cols * LOT.gap + 30, groundY1 = Math.max(80, LOT.y + rows * LOT.gap + 40);
   let back = "", front = "";
-  back += box(-80, -160, -8, groundX1 + 80, groundY1 + 160, 8, { top: "#faf7ff", left: "#ece4fb", right: "#ddd1f6" });
+  back += box(-135, -165, -8, groundX1 + 135, groundY1 + 165, 8, { top: "#faf7ff", left: "#ece4fb", right: "#ddd1f6" });
   back += poly([[LOT.x - 14, LOT.y - 14, 0], [LOT.x + LOT.cols * LOT.gap + 8, LOT.y - 14, 0], [LOT.x + LOT.cols * LOT.gap + 8, LOT.y + rows * LOT.gap + 8, 0], [LOT.x - 14, LOT.y + rows * LOT.gap + 8, 0]], "#f1ebfd");
   for (let i = 0; i < lotsN; i++) { const [x, y] = lotPos(i); back += poly([[x, y, 0], [x + 18, y, 0], [x + 18, y + 18, 0], [x, y + 18, 0]], "#e7ddfa"); }
   // hoppers on stands, with a chute down to the back of their machine
@@ -189,6 +203,22 @@ function buildScene() {
   }).join("");
   front += textOn(LOT.x + (LOT.cols * LOT.gap) / 2, LOT.y + rows * LOT.gap + 28, 0, "Neighbourhood · this quarter", 12, "#4c1d95");
   front += textOn(BELT.x0 + 26, BELT.y + BELT.d + 18, 0, "Land in", 11, "#7a7090");
+  // share-price board on two posts, facing the viewer, in front of the belt
+  {
+    const bx = -122, by = -150, bw = 112, bz = 26, bh = 44;
+    let g = box(bx + 12, by, 0, 3, 3, bz, GREY) + box(bx + bw - 15, by, 0, 3, 3, bz, GREY);
+    g += poly([[bx, by + 3, bz], [bx + bw, by + 3, bz], [bx + bw, by + 3, bz + bh], [bx, by + 3, bz + bh]], "#2e1065");
+    g += poly([[bx + bw, by, bz], [bx + bw, by + 3, bz], [bx + bw, by + 3, bz + bh], [bx + bw, by, bz + bh]], "#1e0a45");
+    g += poly([[bx, by, bz + bh], [bx + bw, by, bz + bh], [bx + bw, by + 3, bz + bh], [bx, by + 3, bz + bh]], "#4c1d95");
+    const M = (x, z) => P(bx + x, by + 3, bz + z);
+    const [ox, oy] = M(0, bh), [ux, uy] = M(1, bh), [vx, vy] = M(0, bh - 1);
+    g += `<g transform="matrix(${(ux - ox).toFixed(4)} ${(uy - oy).toFixed(4)} ${(vx - ox).toFixed(4)} ${(vy - oy).toFixed(4)} ${ox.toFixed(1)} ${oy.toFixed(1)})">
+      <text id="tk-label" x="8" y="13" font-size="8" font-weight="600" fill="#c4b5fd"></text>
+      <text id="tk-price" x="8" y="33" font-size="15" font-weight="700" fill="#ffffff"></text>
+      <text id="tk-change" x="${bw - 8}" y="13" font-size="9.5" font-weight="700" text-anchor="end"></text>
+      <circle id="tk-dot" cx="${bw - 10}" cy="29" r="2.6" fill="#6b5a91"/></g>`;
+    front += `<g class="hot" id="ticker">${g}</g>`;
+  }
 
   svg.innerHTML = `${back}<g id="line">${machines}</g><g id="lots"></g><g id="fly"></g>${front}`;
   const bb = svg.getBBox();
@@ -196,7 +226,9 @@ function buildScene() {
   svg.querySelectorAll("[data-stage]").forEach((el) => el.addEventListener("pointerenter", () => tell("stage", +el.dataset.stage)));
   svg.querySelectorAll("[data-hop]").forEach((el) => el.addEventListener("pointerenter", () => tell("hop", +el.dataset.hop)));
   svg.addEventListener("pointerleave", () => tell(null));
+  svg.querySelector("#ticker")?.addEventListener("pointerenter", () => tell("ticker"));
   drawLots();
+  updateTicker();
 }
 
 // ---------- simulation ----------
@@ -309,11 +341,33 @@ function updateHud() {
     const zt = HOP.z + 8 + (HOP.h - 16) * left;
     document.getElementById("lvl-" + i)?.setAttribute("points", pts([[x + 10, y + HOP.d, HOP.z + 8], [x + 30, y + HOP.d, HOP.z + 8], [x + 30, y + HOP.d, zt], [x + 10, y + HOP.d, zt]]));
   });
+  updateCost();
 }
 
 function buildMaterials() {
   document.getElementById("materials").innerHTML = MATERIALS.map((m, i) =>
-    `<div class="mat" id="mat-${i}"><span class="name">${m.name} used this quarter</span><span class="val"></span><div class="bar"><i></i></div></div>`).join("");
+    `<div class="mat" id="mat-${i}"><span class="name">${m.name} used this quarter</span><span class="val"></span><div class="bar"><i></i></div></div>`).join("") +
+    `<div class="mat cost" id="cost"><span class="name">Material cost this quarter</span><span class="val"></span><span class="sub"></span></div>`;
+}
+const costPerVilla = () => MATERIALS.reduce((sum, m) => sum + (+CFG[m.key] || 0) * (+CFG[m.price] || 0), 0) * (+CFG.usd_to_sar || 0);
+const sar = (n) => n >= 1e6 ? (n / 1e6).toFixed(2) + "M" : n >= 1e3 ? Math.round(n / 1e3).toLocaleString() + "k" : Math.round(n).toLocaleString();
+function updateCost() {
+  const el = document.getElementById("cost");
+  if (!el) return;
+  const per = costPerVilla();
+  el.querySelector(".val").innerHTML = `SAR ${sar(per * delivered)}<small>of ${sar(per * lotsN)}</small>`;
+  el.querySelector(".sub").innerHTML = `1 USD = ${(+CFG.usd_to_sar).toFixed(4)} SAR <span class="tag ${LIVE.rate ? "live" : ""}">${LIVE.rate ? "live" : "fixed"}</span>`;
+}
+function updateTicker() {
+  const price = parseFloat(CFG.stock_price), ch = parseFloat(CFG.stock_change_pct);
+  const L = document.getElementById("tk-label"), Pp = document.getElementById("tk-price"), C = document.getElementById("tk-change"), D = document.getElementById("tk-dot");
+  if (!L) return;
+  L.textContent = String(CFG.stock_label || "Developer share").slice(0, 16);
+  Pp.textContent = isFinite(price) ? price.toFixed(2) : "link a sheet";
+  Pp.setAttribute("font-size", isFinite(price) ? 15 : 11);
+  if (isFinite(ch)) { C.textContent = (ch >= 0 ? "+" : "") + ch.toFixed(2) + "%"; C.setAttribute("fill", ch >= 0 ? "#86efac" : "#fca5a5"); }
+  else C.textContent = "";
+  D.setAttribute("fill", LIVE.stock ? "#86efac" : "#6b5a91");
 }
 
 const info = document.getElementById("info");
@@ -324,6 +378,10 @@ function tell(kind, i) {
   } else if (kind === "hop") {
     const m = MATERIALS[i];
     info.innerHTML = `<b>${m.name}</b> feeds stage ${m.stage + 1}, ${STAGES[m.stage].name}: ${fmt(+CFG[m.key])} ${m.unit} per villa, ${fmt(CFG[m.key] * lotsN)} ${m.unit} per quarter.`;
+  } else if (kind === "ticker") {
+    info.innerHTML = LIVE.stock
+      ? `<b>${CFG.stock_label}</b> share price from your Google Sheet (GOOGLEFINANCE, delayed up to about 20 minutes). Last checked ${LIVE.at.toLocaleTimeString()}.`
+      : `<b>Share price board.</b> Add a live_sheet_url line to numbers.csv with a published Google Sheet that has stock_price and stock_change_pct, and it shows here.`;
   } else info.textContent = "Hover a machine or a hopper to see what it does.";
 }
 
@@ -346,18 +404,65 @@ document.querySelectorAll("[data-speed]").forEach((b) => b.addEventListener("cli
   document.querySelectorAll("[data-speed]").forEach((x) => x.classList.toggle("on", x === b));
 }));
 
-// ---------- numbers.csv: setting,value ----------
+// ---------- settings: numbers.csv, then an optional live Google Sheet ----------
+// a small CSV reader that handles quoted values such as "1,234.50"
+function rowsOf(text) {
+  const rows = [];
+  for (const line of text.replace(/^\uFEFF/, "").split(/\r?\n/)) {
+    const cells = []; let cur = "", q = false;
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      if (q) { if (ch === '"' && line[i + 1] === '"') { cur += '"'; i++; } else if (ch === '"') q = false; else cur += ch; }
+      else if (ch === '"') q = true;
+      else if (ch === "," || ch === ";" || ch === "\t") { cells.push(cur.trim()); cur = ""; }
+      else cur += ch;
+    }
+    cells.push(cur.trim());
+    rows.push(cells);
+  }
+  return rows;
+}
+function apply(text, source) {
+  const got = new Set();
+  for (const [k0, v0] of rowsOf(text)) {
+    const k = (k0 || "").trim().toLowerCase(), v = (v0 || "").trim();
+    if (!k || v === "") continue;
+    if (k in TEXT_KEYS) { CFG[k] = v; got.add(k); continue; }
+    if (!(k in DEFAULTS)) continue;
+    const n = parseFloat(v.replace(/[^0-9.\-]/g, ""));
+    if (isFinite(n)) { CFG[k] = n; got.add(k); }
+  }
+  if (source === "live") {
+    LIVE.rate = got.has("usd_to_sar");
+    LIVE.stock = got.has("stock_price");
+    LIVE.at = new Date();
+  }
+}
 async function loadSettings() {
   try {
     const res = await fetch("numbers.csv?v=" + Date.now(), { cache: "no-store" });
-    if (!res.ok) return;
-    const text = (await res.text()).replace(/^﻿/, "");
-    for (const line of text.split(/\r?\n/)) {
-      const [k, v] = line.split(/[,;\t]/).map((c) => (c || "").trim().replace(/^"|"$/g, ""));
-      if (k && k in DEFAULTS && v !== "" && isFinite(+v) && +v >= 0) CFG[k] = +v;
-    }
+    if (res.ok) apply(await res.text(), "file");
   } catch {}
+  await loadLive();
 }
+async function loadLive() {
+  const url = String(CFG.live_sheet_url || "");
+  if (!/^https:\/\/docs\.google\.com\//.test(url)) return false;
+  try {
+    const res = await fetch(url + (url.includes("?") ? "&" : "?") + "t=" + Date.now(), { cache: "no-store" });
+    if (!res.ok) return false;
+    apply(await res.text(), "live");
+    return true;
+  } catch { return false; }
+}
+// re-read the live sheet every 5 minutes while the page is open
+setInterval(async () => {
+  const before = Math.round(CFG.villas_per_quarter);
+  if (await loadLive()) {
+    if (Math.round(CFG.villas_per_quarter) !== before) { buildScene(); }
+    updateHud(); updateTicker();
+  }
+}, 5 * 60 * 1000);
 
 buildMaterials();
 loadSettings().finally(() => {

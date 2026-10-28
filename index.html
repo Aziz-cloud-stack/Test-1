@@ -7,58 +7,71 @@
 <style>
 html,body{margin:0;background:#fff;font-family:"Segoe UI",Helvetica,Arial,sans-serif}
 main{max-width:640px;margin:0 auto;padding:32px 16px;text-align:center}
-svg{width:100%;height:auto;display:block;-webkit-tap-highlight-color:transparent}
-.band{cursor:pointer;outline:none;transition:opacity .25s,transform .25s,filter .25s;transform-box:fill-box;transform-origin:center}
+#art svg{width:100%;height:auto;display:block;cursor:grab;touch-action:pan-y;-webkit-tap-highlight-color:transparent;user-select:none;-webkit-user-select:none}
+#art svg.dragging{cursor:grabbing}
+.band{outline:none;transition:opacity .25s,filter .25s}
 .label{transition:opacity .25s;cursor:pointer}
-.label text{transition:font-size .2s}
 svg.focus .band:not(.on),svg.focus .label:not(.on){opacity:.35}
-.band.on{filter:brightness(1.15) drop-shadow(0 6px 10px rgba(76,29,149,.35));transform:scale(1.04)}
+.band.on{filter:brightness(1.15) drop-shadow(0 6px 10px rgba(76,29,149,.35))}
 .label.on text{font-size:22px}
 #readout{height:40px;margin-top:4px;font-size:28px;font-weight:700;color:#6d28d9}
 #readout span{font-size:16px;font-weight:600;color:#7a7090;margin-left:8px}
 .hint{margin:0;color:#7a7090;font-size:13px}
-@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+#art svg:focus{outline:none}
+#art svg:focus-visible{outline:2px solid #6d28d9;outline-offset:4px;border-radius:12px}
 </style>
 </head>
 <body>
 <main>
 <div id="art"></div>
 <div id="readout" aria-live="polite"></div>
-<p class="hint">Hover or tap a band</p>
+<p class="hint">Drag to rotate · hover or tap a band · arrow keys work too</p>
 </main>
 <script>
-// Numbers used if numbers.xlsx can't be read. Top of the diamond first.
+// Numbers used if numbers.csv can't be read. Top of the diamond first.
 const FALLBACK = [20, 40, 80, 80, 40, 20];
 const DATA_FILE = "numbers.csv";
 
+const W = 560, R = 150, CX = 280, LX = CX + R + 60;
 const f = (n) => n.toFixed(1);
-function diamondSvg(COUNTS) {
-  const total = COUNTS.reduce((a, b) => a + b, 0), n = COUNTS.length;
-  // widest point sits just below the largest band
-  let m = COUNTS.reduce((best, c, i) => (c > COUNTS[best] ? i : best), 0);
+const unit = (a) => { const l = Math.hypot(...a); return a.map((c) => c / l); };
+const sub = (a, b) => a.map((c, i) => c - b[i]);
+const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+const lerp = (a, b, t) => a.map((c, i) => c + (b[i] - c) * t);
+const LIGHT = unit([-0.55, -0.6, 0.7]);   // fixed to the viewer, so facets catch the light as it turns
+
+let COUNTS = FALLBACK.slice();
+let geo = null;                 // band heights for the current numbers
+let yaw = 0.35, tilt = 14;      // radians, degrees
+let pinned = null, hover = null;
+
+function setup(counts) {
+  const total = counts.reduce((a, b) => a + b, 0), n = counts.length;
+  let m = counts.reduce((best, c, i) => (c > counts[best] ? i : best), 0);
   if (m === n - 1 && n > 1) m = n - 2;
-  let crown = COUNTS.slice(0, m + 1).reduce((a, b) => a + b, 0), pav = total - crown;
+  let crown = counts.slice(0, m + 1).reduce((a, b) => a + b, 0), pav = total - crown;
   if (n === 1) { crown = total * 0.55; pav = total * 0.45; }
-  const K = 420 / total, top = crown * K, bot = pav * K, R = 150, E = (14 * Math.PI) / 180, CX = 280;
-  const CY = 40 + top * Math.cos(E);
-  const proj = ([x, y, z]) => [CX + x, CY - z * Math.cos(E) - y * Math.sin(E)];
-  const view = [0, -Math.cos(E), Math.sin(E)];
-  const unit = (a) => { const l = Math.hypot(...a); return a.map((c) => c / l); };
-  const light = unit([-0.55, -0.6, 0.7]);
-  const sub = (a, b) => a.map((c, i) => c - b[i]);
-  const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
-  const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
-  const lerp = (a, b, t) => a.map((c, i) => c + (b[i] - c) * t);
-  const girdle = Array.from({ length: 6 }, (_, i) => [R * Math.cos((i * Math.PI) / 3), R * Math.sin((i * Math.PI) / 3), 0]);
+  const K = 420 / total, top = crown * K, bot = pav * K;
+  const cuts = [top];
+  counts.forEach((c) => cuts.push(cuts[cuts.length - 1] - c * K));
+  cuts[cuts.length - 1] = -bot;
+  geo = { counts, total, top, bot, cuts };
+}
+
+function frame() {
+  const { counts, total, top, bot, cuts } = geo;
+  const E = (tilt * Math.PI) / 180, cE = Math.cos(E), sE = Math.sin(E);
+  const CY = 60 + top * cE;
+  const proj = ([x, y, z]) => [CX + x, CY - z * cE - y * sE];
+  const view = [0, -cE, sE];
+  const girdle = Array.from({ length: 6 }, (_, i) => { const a = yaw + (i * Math.PI) / 3; return [R * Math.cos(a), R * Math.sin(a), 0]; });
   const APEX = [0, 0, top], TIP = [0, 0, -bot];
   const onEdge = (v, z) => (z >= 0 ? lerp(v, APEX, z / top) : lerp(v, TIP, -z / bot));
-  const cuts = [top];
-  COUNTS.forEach((c) => cuts.push(cuts[cuts.length - 1] - c * K));
-  cuts[cuts.length - 1] = -bot;
   let gem = "", labels = "", lastY = -1e9;
-  COUNTS.forEach((count, b) => {
+  counts.forEach((count, b) => {
     const z1 = cuts[b], z0 = cuts[b + 1];
-    gem += `<g class="band" data-i="${b}" tabindex="0" role="button" aria-label="${count}, ${((100 * count) / total).toFixed(1)}% of ${total}">`;
+    let polys = "", maxX = -1e9, maxY = 0;
     for (let i = 0; i < 6; i++) {
       const a = girdle[i], c = girdle[(i + 1) % 6];
       for (const up of [true, false]) {
@@ -67,65 +80,116 @@ function diamondSvg(COUNTS) {
         const pk = up ? APEX : TIP;
         const nrm = unit(up ? cross(sub(c, a), sub(pk, a)) : cross(sub(pk, a), sub(c, a)));
         if (dot(nrm, view) <= 0) continue;
-        const t = Math.min(1, (up ? 0.35 : 0.12) + Math.max(0, dot(nrm, light)) * 0.65) - 0.5;
-        const pp = [onEdge(a, lo), onEdge(c, lo), onEdge(c, hi), onEdge(a, hi)].map(proj).map((p) => f(p[0]) + "," + f(p[1])).join(" ");
-        gem += `<polygon points="${pp}" fill="url(#gg)"/><polygon points="${pp}" fill="${t > 0 ? "#fff" : "#1a0638"}" fill-opacity="${Math.abs(t * 0.9).toFixed(2)}" stroke="#fff" stroke-width="1.4" stroke-linejoin="round"/>`;
+        const t = Math.min(1, (up ? 0.35 : 0.12) + Math.max(0, dot(nrm, LIGHT)) * 0.65) - 0.5;
+        const pts = [onEdge(a, lo), onEdge(c, lo), onEdge(c, hi), onEdge(a, hi)].map(proj);
+        const pp = pts.map((p) => f(p[0]) + "," + f(p[1])).join(" ");
+        polys += `<polygon points="${pp}" fill="url(#gg)"/><polygon points="${pp}" fill="${t > 0 ? "#fff" : "#1a0638"}" fill-opacity="${Math.abs(t * 0.9).toFixed(2)}" stroke="#fff" stroke-width="1.4" stroke-linejoin="round"/>`;
       }
     }
-    gem += `</g>`;
-    const e = proj(onEdge(girdle[0], (z0 + z1) / 2)), lx = CX + R + 60;
-    const ly = Math.max(e[1], lastY + 24); lastY = ly;
-    labels += `<g class="label" data-i="${b}"><path d="M${f(e[0] + 8)} ${f(e[1])}H${lx - 26}L${lx - 10} ${f(ly)}" fill="none" stroke="#c9bde6"/><circle cx="${f(e[0] + 8)}" cy="${f(e[1])}" r="2.2" fill="#6d28d9"/><text x="${lx}" y="${f(ly + 6)}" font-size="18" font-weight="700" fill="#6d28d9" text-anchor="start">${count}</text></g>`;
+    // the band's right-hand edge at its middle height, for the pointer line
+    const zm = (z0 + z1) / 2;
+    for (let i = 0; i < 6; i++) { const p = proj(onEdge(girdle[i], zm)); if (p[0] > maxX) { maxX = p[0]; maxY = p[1]; } }
+    const on = b === (hover ?? pinned) ? " on" : "";
+    gem += `<g class="band${on}" data-i="${b}">${polys}</g>`;
+    const ly = Math.max(maxY, lastY + 24); lastY = ly;
+    labels += `<g class="label${on}" data-i="${b}"><path d="M${f(maxX + 8)} ${f(maxY)}H${LX - 26}L${LX - 10} ${f(ly)}" fill="none" stroke="#c9bde6"/><circle cx="${f(maxX + 8)}" cy="${f(maxY)}" r="2.2" fill="#6d28d9"/><text x="${LX}" y="${f(ly + 6)}" font-size="18" font-weight="700" fill="#6d28d9">${count}</text></g>`;
   });
-  const tp = proj(TIP), ap = proj(APEX), H = Math.ceil(Math.max(tp[1] + 40, lastY + 30));
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 560 ${H}" role="img" aria-label="Purple faceted diamond in ${n} bands: ${COUNTS.join(", ")}">
-<defs><linearGradient id="gg" gradientUnits="userSpaceOnUse" x1="0" y1="${f(ap[1])}" x2="0" y2="${f(tp[1])}"><stop offset="0" stop-color="#f0abfc"/><stop offset=".35" stop-color="#c084fc"/><stop offset=".62" stop-color="#8b5cf6"/><stop offset="1" stop-color="#3b0d8c"/></linearGradient>
-<radialGradient id="sh"><stop offset="0" stop-color="#3b1a7a" stop-opacity=".28"/><stop offset="1" stop-color="#3b1a7a" stop-opacity="0"/></radialGradient></defs>
-<ellipse cx="${f(tp[0])}" cy="${f(tp[1] + 18)}" rx="120" ry="14" fill="url(#sh)"/>${gem}${labels}</svg>`;
+  const tp = proj(TIP), ap = proj(APEX);
+  document.getElementById("gg").setAttribute("y1", f(ap[1]));
+  document.getElementById("gg").setAttribute("y2", f(tp[1]));
+  const sh = document.getElementById("shadow");
+  sh.setAttribute("cx", f(tp[0])); sh.setAttribute("cy", f(tp[1] + 18));
+  sh.setAttribute("ry", f(6 + 10 * Math.sin(E) / Math.sin((40 * Math.PI) / 180)));
+  const active = hover ?? pinned;
+  document.getElementById("gem").innerHTML = gem;
+  document.getElementById("labels").innerHTML = labels;
+  svg.classList.toggle("focus", active !== null);
+  const H = Math.ceil(Math.max(tp[1] + 40, lastY + 30));
+  if (svg.getAttribute("data-h") !== String(H)) { svg.setAttribute("viewBox", `0 0 ${W} ${H}`); svg.setAttribute("data-h", H); }
 }
 
 const art = document.getElementById("art"), out = document.getElementById("readout");
-let pinned = null;
-let outsideBound = false;
+art.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} 600" tabindex="0" role="img" aria-label="Purple faceted diamond. Drag or use the arrow keys to rotate it.">
+<defs><linearGradient id="gg" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="0" y2="500"><stop offset="0" stop-color="#f0abfc"/><stop offset=".35" stop-color="#c084fc"/><stop offset=".62" stop-color="#8b5cf6"/><stop offset="1" stop-color="#3b0d8c"/></linearGradient>
+<radialGradient id="sh"><stop offset="0" stop-color="#3b1a7a" stop-opacity=".28"/><stop offset="1" stop-color="#3b1a7a" stop-opacity="0"/></radialGradient></defs>
+<ellipse id="shadow" rx="120" ry="14" fill="url(#sh)"/><g id="gem"></g><g id="labels"></g></svg>`;
+const svg = art.querySelector("svg");
 
-function draw(COUNTS) {
-  const TOTAL = COUNTS.reduce((a, b) => a + b, 0);
-  art.innerHTML = diamondSvg(COUNTS);
-  const svg = art.querySelector("svg");
-  const bands = [...svg.querySelectorAll(".band")], labels = [...svg.querySelectorAll(".label")];
-  pinned = null;
-  out.innerHTML = "";
-  const show = (i) => {
-    svg.classList.toggle("focus", i !== null);
-    bands.forEach((b, j) => b.classList.toggle("on", j === i));
-    labels.forEach((l, j) => l.classList.toggle("on", j === i));
-    out.innerHTML = i === null ? "" : COUNTS[i] + "<span>" + ((100 * COUNTS[i]) / TOTAL).toFixed(1) + "% of " + TOTAL + "</span>";
-    if (i !== null) bands[i].parentNode.appendChild(bands[i]);
-  };
-  [...bands, ...labels].forEach((el) => {
-    const i = +el.dataset.i;
-    el.addEventListener("pointerenter", (e) => { if (e.pointerType === "mouse") show(i); });
-    el.addEventListener("pointerleave", (e) => { if (e.pointerType === "mouse") show(pinned); });
-    el.addEventListener("click", () => { pinned = pinned === i ? null : i; show(pinned); });
-  });
-  bands.forEach((b) => {
-    b.addEventListener("focus", () => show(+b.dataset.i));
-    b.addEventListener("blur", () => show(pinned));
-    b.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); b.click(); } });
-  });
-  window.__clear = () => { pinned = null; show(null); };
-  if (!outsideBound) {
-    outsideBound = true;
-    document.addEventListener("click", (e) => { if (!e.target.closest(".band,.label")) window.__clear(); });
-  }
+// draw one frame, then lift the active band to the top so its glow shows
+function render() {
+  frame();
+  const active = hover ?? pinned;
+  if (active !== null) { const g = svg.querySelector(`#gem .band[data-i="${active}"]`); if (g) g.parentNode.appendChild(g); }
+  out.innerHTML = active === null ? "" : geo.counts[active] + "<span>" + ((100 * geo.counts[active]) / geo.total).toFixed(1) + "% of " + geo.total + "</span>";
 }
 
-// Read the numbers from numbers.csv: every positive number in the second column, top to bottom.
+// ---- motion: idle spin, drag with momentum ----
+const still = matchMedia("(prefers-reduced-motion: reduce)");
+let spin = !still.matches, vel = 0, last = 0, raf = 0, idleTimer = 0;
+function loop(now) {
+  const dt = last ? Math.min((now - last) / 1000, 1 / 20) : 1 / 60; last = now;
+  if (!dragging) {
+    if (Math.abs(vel) > 0.01) { yaw += vel * dt; vel *= Math.exp(-dt * 3); }
+    else if (spin) yaw += 0.35 * dt;
+  }
+  render();
+  raf = (spin || dragging || Math.abs(vel) > 0.01) ? requestAnimationFrame(loop) : 0;
+}
+const kick = () => { if (!raf) { last = 0; raf = requestAnimationFrame(loop); } };
+const pause = () => { spin = false; clearTimeout(idleTimer); idleTimer = setTimeout(() => { if (!still.matches) { spin = true; kick(); } }, 5000); };
+
+let dragging = false, moved = 0, sx = 0, sy = 0, lastX = 0, lastT = 0;
+svg.addEventListener("pointerdown", (e) => {
+  dragging = true; moved = 0; sx = lastX = e.clientX; sy = e.clientY; lastT = performance.now(); vel = 0;
+  svg.setPointerCapture(e.pointerId); svg.classList.add("dragging"); pause(); kick();
+});
+svg.addEventListener("pointermove", (e) => {
+  if (dragging) {
+    const box = svg.getBoundingClientRect(), scale = W / box.width;
+    const dx = e.clientX - lastX, now = performance.now();
+    moved += Math.abs(dx) + Math.abs(e.movementY || 0);
+    yaw -= (dx * scale) / R;
+    vel = (-(dx * scale) / R) / Math.max(0.008, (now - lastT) / 1000);
+    if (e.pointerType === "mouse") tilt = Math.min(40, Math.max(4, tilt + (e.movementY || 0) * 0.25));
+    lastX = e.clientX; lastT = now;
+    return;
+  }
+  if (e.pointerType !== "mouse") return;
+  const el = e.target.closest(".band,.label");
+  const i = el ? +el.dataset.i : null;
+  if (i !== hover) { hover = i; render(); }
+});
+const end = (e) => {
+  if (!dragging) return;
+  dragging = false; svg.classList.remove("dragging");
+  if (performance.now() - lastT > 80) vel = 0;
+  if (moved < 6) {              // a tap or click, not a drag: select the band under the pointer
+    const el = document.elementFromPoint(e.clientX, e.clientY)?.closest(".band,.label");
+    const i = el ? +el.dataset.i : null;
+    pinned = i === null || pinned === i ? null : i;
+    hover = null;
+  }
+  render(); kick();
+};
+svg.addEventListener("pointerup", end);
+svg.addEventListener("pointercancel", end);
+svg.addEventListener("pointerleave", (e) => { if (!dragging && hover !== null) { hover = null; render(); } });
+svg.addEventListener("keydown", (e) => {
+  const k = e.key;
+  if (k === "ArrowLeft") yaw += 0.15; else if (k === "ArrowRight") yaw -= 0.15;
+  else if (k === "ArrowUp") tilt = Math.min(40, tilt + 3); else if (k === "ArrowDown") tilt = Math.max(4, tilt - 3);
+  else if (k === "Enter" || k === " ") pinned = pinned === null ? 0 : (pinned + 1) % geo.counts.length;
+  else if (k === "Escape") pinned = null;
+  else return;
+  e.preventDefault(); pause(); render();
+});
+
+// ---- numbers from numbers.csv: every positive number in the second column, top to bottom ----
 async function loadNumbers() {
   try {
     const res = await fetch(DATA_FILE + "?v=" + Date.now(), { cache: "no-store" });
     if (!res.ok) return null;
-    const text = (await res.text()).replace(/^\uFEFF/, "");
+    const text = (await res.text()).replace(/^﻿/, "");
     const nums = [];
     for (const line of text.split(/\r?\n/)) {
       const cells = line.split(/[,;\t]/).map((c) => c.trim().replace(/^"|"$/g, ""));
@@ -137,8 +201,8 @@ async function loadNumbers() {
   } catch { return null; }
 }
 
-draw(FALLBACK);
-loadNumbers().then((nums) => { if (nums && nums.join() !== FALLBACK.join()) draw(nums); });
+setup(COUNTS); render(); kick();
+loadNumbers().then((nums) => { if (nums && nums.join() !== COUNTS.join()) { COUNTS = nums; pinned = hover = null; setup(COUNTS); render(); } });
 </script>
 </body>
 </html>

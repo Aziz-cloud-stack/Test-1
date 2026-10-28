@@ -1,7 +1,6 @@
-Band,Number
-1 (top),27
-2,40
-3,80
-4,80
-5,40
-6 (bottom),20
+setting,value
+villas_per_quarter,50
+cement_tonnes_per_villa,40
+steel_tonnes_per_villa,12
+bricks_thousand_per_villa,18
+glass_m2_per_villa,60

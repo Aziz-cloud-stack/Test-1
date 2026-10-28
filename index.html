@@ -5,254 +5,367 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Test 1</title>
 <style>
-html,body{margin:0;background:#fff;font-family:"Segoe UI",Helvetica,Arial,sans-serif}
-main{max-width:640px;margin:0 auto;padding:32px 16px;text-align:center}
-#art svg{width:100%;height:auto;display:block;cursor:grab;touch-action:pan-y;-webkit-tap-highlight-color:transparent;user-select:none;-webkit-user-select:none}
-#art svg.dragging{cursor:grabbing}
-.band{outline:none;transition:opacity .25s,filter .25s}
-.label{transition:opacity .25s;cursor:pointer}
-svg.focus .band:not(.on),svg.focus .label:not(.on){opacity:.35}
-.band.on{filter:brightness(1.12) drop-shadow(0 0 8px rgba(124,58,237,.45))}
-.label.on text{font-size:22px}
-#readout{height:40px;margin-top:4px;font-size:28px;font-weight:700;color:#6d28d9}
-#readout span{font-size:16px;font-weight:600;color:#7a7090;margin-left:8px}
-.hint{margin:0;color:#7a7090;font-size:13px}
-#art svg:focus{outline:none}
-#art svg:focus-visible{outline:2px solid #6d28d9;outline-offset:4px;border-radius:12px}
+:root{--ink:#1f1630;--muted:#7a7090;--accent:#6d28d9;--soft:#f3edff;--line:#e6def5}
+*{box-sizing:border-box}
+html,body{margin:0;background:#fff;color:var(--ink);font-family:"Segoe UI",Helvetica,Arial,sans-serif}
+main{max-width:980px;margin:0 auto;padding:28px 16px 48px;display:grid;gap:16px}
+.top{display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between}
+.counter{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.counter b{font-size:34px;color:var(--accent);font-variant-numeric:tabular-nums}
+.counter span{color:var(--muted);font-size:15px}
+.quarters{display:flex;gap:6px;flex-wrap:wrap}
+.q{font-size:12px;font-weight:600;padding:4px 10px;border-radius:999px;border:1px solid var(--line);color:var(--muted);font-variant-numeric:tabular-nums}
+.q.done{background:var(--soft);border-color:#d8c8fb;color:var(--accent)}
+.q.now{background:var(--accent);border-color:var(--accent);color:#fff}
+.controls{display:flex;gap:6px;align-items:center}
+button{font-weight:600;font-size:13px;font-family:inherit;border:1px solid var(--accent);color:var(--accent);background:#fff;border-radius:8px;padding:6px 12px;cursor:pointer}
+button.on{background:var(--accent);color:#fff}
+button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.stage{overflow-x:auto}
+svg{width:100%;min-width:640px;height:auto;display:block}
+.hot{cursor:pointer}
+.hot:hover{filter:brightness(1.08)}
+#info{min-height:44px;margin:0;padding:10px 14px;border-radius:10px;background:var(--soft);color:var(--ink);font-size:14px}
+#info b{color:var(--accent)}
+.materials{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px}
+.mat{border:1px solid var(--line);border-radius:10px;padding:10px 12px;display:grid;gap:6px}
+.mat .name{font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+.mat .val{font-size:20px;font-weight:700;font-variant-numeric:tabular-nums}
+.mat .val small{font-size:12px;font-weight:600;color:var(--muted);margin-left:4px}
+.bar{height:6px;border-radius:3px;background:var(--soft);overflow:hidden}
+.bar i{display:block;height:100%;background:linear-gradient(90deg,#c084fc,#6d28d9);width:0}
+.note{margin:0;color:var(--muted);font-size:12px}
 </style>
 </head>
 <body>
 <main>
-<div id="art"></div>
-<div id="readout" aria-live="polite"></div>
-<p class="hint">Drag to rotate · hover or tap a section · arrow keys work too</p>
+  <div class="top">
+    <div class="counter"><b id="count">0 / 50</b><span id="qlabel">villas delivered · Q1</span></div>
+    <div class="controls">
+      <button id="play" class="on" type="button" aria-pressed="true">Pause</button>
+      <button data-speed="1" class="on" type="button">1×</button>
+      <button data-speed="2" type="button">2×</button>
+      <button data-speed="4" type="button">4×</button>
+    </div>
+  </div>
+  <div class="quarters" id="quarters"></div>
+  <div class="stage"><svg id="scene" role="img" aria-label="A villa factory: hoppers of cement, steel, bricks and glass feed four machines on a conveyor (foundation, structure, walls and roof, finishing). Finished villas fill a neighbourhood plot, 50 per quarter."></svg></div>
+  <p id="info">Hover a machine or a hopper to see what it does.</p>
+  <div class="materials" id="materials"></div>
+  <p class="note">Dummy figures for illustration. Change them in numbers.csv.</p>
 </main>
 <script>
-// Numbers used if numbers.csv can't be read. Top floor first.
-const FALLBACK = [20, 40, 80, 80, 40, 20];
-const DATA_FILE = "numbers.csv";
-
-const W = 560, CX = 250, LX = 440, S0 = 92;   // S0: half-width of the ground floor
-const f = (n) => n.toFixed(1);
-const unit = (a) => { const l = Math.hypot(...a); return a.map((c) => c / l); };
-const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
-const LIGHT = unit([-0.55, -0.6, 0.7]);   // fixed to the viewer, so the walls catch the light as it turns
-
-let COUNTS = FALLBACK.slice();
-let geo = null;
-let yaw = 0.5, tilt = 18;       // radians, degrees
-let pinned = null, hover = null;
-
-// Each number is one section of the tower; its height is proportional to the number.
-// Sections step in a little as they go up, like a setback skyscraper.
-function setup(counts) {
-  const total = counts.reduce((a, b) => a + b, 0), n = counts.length;
-  const K = 380 / total;
-  const secs = [];
-  let z = 0;
-  for (let k = n - 1; k >= 0; k--) {             // build from the ground up; counts[0] is the top
-    const h = counts[k] * K, up = n - 1 - k;
-    const s = S0 * Math.max(0.5, 1 - 0.075 * up);
-    secs[k] = { z0: z, z1: z + h, s };
-    z += h;
-  }
-  geo = { counts, total, secs, height: z };
-}
-
-function frame() {
-  const { counts, secs, height } = geo;
-  const E = (tilt * Math.PI) / 180, cE = Math.cos(E), sE = Math.sin(E);
-  const BASE = 60 + (height + 34) * cE;           // screen y of ground level at the centre
-  const proj = ([x, y, z]) => [CX + x, BASE - z * cE - y * sE];
-  const view = [0, -cE, sE];
-  const pt = (p) => { const q = proj(p); return f(q[0]) + "," + f(q[1]); };
-  const poly = (pts) => pts.map(pt).join(" ");
-  // the four corners of a square of half-width s, turned by yaw
-  const cornersOf = (s) => [0, 1, 2, 3].map((k) => { const a = yaw + Math.PI / 4 + (k * Math.PI) / 2; return [s * Math.SQRT2 * Math.cos(a), s * Math.SQRT2 * Math.sin(a)]; });
-  const shadeOf = (nrm, base) => Math.min(1, base + Math.max(0, dot(nrm, LIGHT)) * 0.65) - 0.5;
-  const tint = (t) => `fill="${t > 0 ? "#fff" : "#1a0638"}" fill-opacity="${Math.abs(t * 0.9).toFixed(2)}"`;
-
-  // plaza the tower stands on
-  const P = cornersOf(S0 + 26);
-  let plaza = `<polygon points="${poly(P.map(([x, y]) => [x, y, 0]))}" fill="#f1ebfd" stroke="#ddd0f7" stroke-width="1"/>`;
-  for (let k = 0; k < 4; k++) {
-    const a = P[k], c = P[(k + 1) % 4], nrm = unit([c[1] - a[1], -(c[0] - a[0]), 0]);
-    if (dot(nrm, view) > 0) plaza += `<polygon points="${poly([[a[0], a[1], 0], [c[0], c[1], 0], [c[0], c[1], -6], [a[0], a[1], -6]])}" fill="#e2d6f8"/>`;
-  }
-
-  let tower = "", labels = "", lastY = -1e9;
-  const active = hover ?? pinned;
-  // draw from the ground up so each section sits on the one below
-  for (let b = counts.length - 1; b >= 0; b--) {
-    const { z0, z1, s } = secs[b];
-    const C = cornersOf(s);
-    let g = "";
-    for (let k = 0; k < 4; k++) {
-      const a = C[k], c = C[(k + 1) % 4];
-      const nrm = unit([c[1] - a[1], -(c[0] - a[0]), 0]);
-      const facing = dot(nrm, view);
-      if (facing <= 0) continue;
-      const t = shadeOf(nrm, 0.25);
-      const wall = [[a[0], a[1], z0], [c[0], c[1], z0], [c[0], c[1], z1], [a[0], a[1], z1]];
-      g += `<polygon points="${poly(wall)}" fill="url(#gg)"/><polygon points="${poly(wall)}" ${tint(t)} stroke="#fff" stroke-width="1.2" stroke-linejoin="round"/>`;
-      // windows: a grid of glass panes on each visible wall
-      const h = z1 - z0, cols = Math.max(3, Math.round((2 * s) / 26)), rows = Math.max(1, Math.floor((h - 6) / 15));
-      const at = (u, z) => [a[0] + (c[0] - a[0]) * u, a[1] + (c[1] - a[1]) * u, z];
-      const glass = 0.18 + 0.32 * Math.max(0, dot(nrm, LIGHT));
-      let win = "";
-      for (let r = 0; r < rows; r++) {
-        const zb = z0 + 5 + (r * (h - 8)) / rows, zt = zb + ((h - 8) / rows) * 0.62;
-        for (let q = 0; q < cols; q++) {
-          // the ground floor's middle bay on wall 0 is the entrance
-          if (b === counts.length - 1 && k === 0 && r === 0 && q === Math.floor(cols / 2)) continue;
-          const u0 = (q + 0.2) / cols, u1 = (q + 0.8) / cols;
-          win += `<polygon points="${poly([at(u0, zb), at(u1, zb), at(u1, zt), at(u0, zt)])}"/>`;
-        }
-      }
-      g += `<g fill="#ffffff" fill-opacity="${glass.toFixed(2)}">${win}</g>`;
-      if (b === counts.length - 1 && k === 0) {
-        const q = Math.floor(cols / 2), u0 = (q + 0.12) / cols, u1 = (q + 0.88) / cols, zt = Math.min(z0 + 20, z1 - 4);
-        g += `<polygon points="${poly([at(u0, z0), at(u1, z0), at(u1, zt), at(u0, zt)])}" fill="#2a0b5e" fill-opacity=".75"/>`;
-        g += `<polygon points="${poly([at(u0 - 0.04, zt + 1), at(u1 + 0.04, zt + 1), at(u1 + 0.04, zt + 3.5), at(u0 - 0.04, zt + 3.5)])}" fill="#fff" fill-opacity=".8"/>`;
-      }
-    }
-    // roof / ledge: the top of this section, seen from above
-    g += `<polygon points="${poly(C.map(([x, y]) => [x, y, z1]))}" fill="#efe6ff" stroke="#fff" stroke-width="1.2" stroke-linejoin="round"/>`;
-    if (b === 0) {
-      // roof details on the top section: a plant room and an antenna
-      const r = cornersOf(s * 0.42), rz = z1 + 12;
-      for (let k = 0; k < 4; k++) {
-        const a = r[k], c = r[(k + 1) % 4], nrm = unit([c[1] - a[1], -(c[0] - a[0]), 0]);
-        if (dot(nrm, view) > 0) g += `<polygon points="${poly([[a[0], a[1], z1], [c[0], c[1], z1], [c[0], c[1], rz], [a[0], a[1], rz]])}" fill="url(#gg)"/><polygon points="${poly([[a[0], a[1], z1], [c[0], c[1], z1], [c[0], c[1], rz], [a[0], a[1], rz]])}" ${tint(shadeOf(nrm, 0.3))}/>`;
-      }
-      g += `<polygon points="${poly(r.map(([x, y]) => [x, y, rz]))}" fill="#f5efff" stroke="#fff" stroke-width="1"/>`;
-      const base = proj([0, 0, rz]), tip = proj([0, 0, rz + 34]);
-      g += `<line x1="${f(base[0])}" y1="${f(base[1])}" x2="${f(tip[0])}" y2="${f(tip[1])}" stroke="#7c3aed" stroke-width="2.2" stroke-linecap="round"/><circle cx="${f(tip[0])}" cy="${f(tip[1])}" r="3" fill="#f0abfc"/>`;
-    }
-    const on = b === active ? " on" : "";
-    tower += `<g class="band${on}" data-i="${b}">${g}</g>`;
-    // pointer from the section's right-hand edge at mid height
-    const zm = (z0 + z1) / 2;
-    let mx = -1e9, my = 0;
-    for (const [x, y] of C) { const p = proj([x, y, zm]); if (p[0] > mx) { mx = p[0]; my = p[1]; } }
-    labels = `<g class="label${on}" data-i="${b}" data-y="${f(my)}" data-x="${f(mx)}"></g>` + labels;
-  }
-  // lay out labels top to bottom, at least 24px apart
-  const tmp = document.createElement("div");
-  tmp.innerHTML = `<svg>${labels}</svg>`;
-  let html = "";
-  [...tmp.querySelectorAll("g")].forEach((el) => {
-    const i = +el.dataset.i, mx = +el.dataset.x, my = +el.dataset.y, on = el.classList.contains("on") ? " on" : "";
-    const ly = Math.max(my, lastY + 24); lastY = ly;
-    html += `<g class="label${on}" data-i="${i}"><path d="M${f(mx + 8)} ${f(my)}H${LX - 26}L${LX - 10} ${f(ly)}" fill="none" stroke="#c9bde6"/><circle cx="${f(mx + 8)}" cy="${f(my)}" r="2.2" fill="#6d28d9"/><text x="${LX}" y="${f(ly + 6)}" font-size="18" font-weight="700" fill="#6d28d9">${counts[i]}</text></g>`;
-  });
-  const topY = proj([0, 0, height])[1], groundY = proj([0, 0, 0])[1];
-  const gg = document.getElementById("gg");
-  gg.setAttribute("y1", f(topY)); gg.setAttribute("y2", f(groundY));
-  const sh = document.getElementById("shadow");
-  sh.setAttribute("cx", f(CX)); sh.setAttribute("cy", f(groundY + 10));
-  sh.setAttribute("rx", "170"); sh.setAttribute("ry", f(10 + 30 * sE));
-  document.getElementById("gem").innerHTML = plaza + tower;
-  document.getElementById("labels").innerHTML = html;
-  svg.classList.toggle("focus", active !== null);
-  const H = Math.ceil(Math.max(groundY + (S0 + 26) * Math.SQRT2 * sE + 30, lastY + 30));
-  if (svg.getAttribute("data-h") !== String(H)) { svg.setAttribute("viewBox", `0 0 ${W} ${H}`); svg.setAttribute("data-h", H); }
-}
-
-const art = document.getElementById("art"), out = document.getElementById("readout");
-art.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} 600" tabindex="0" role="img" aria-label="Purple building with stacked sections, one per number. Drag or use the arrow keys to rotate it.">
-<defs><linearGradient id="gg" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="0" y2="500"><stop offset="0" stop-color="#f0abfc"/><stop offset=".35" stop-color="#c084fc"/><stop offset=".62" stop-color="#8b5cf6"/><stop offset="1" stop-color="#3b0d8c"/></linearGradient>
-<radialGradient id="sh"><stop offset="0" stop-color="#3b1a7a" stop-opacity=".22"/><stop offset="1" stop-color="#3b1a7a" stop-opacity="0"/></radialGradient></defs>
-<ellipse id="shadow" rx="170" ry="14" fill="url(#sh)"/><g id="gem"></g><g id="labels"></g></svg>`;
-const svg = art.querySelector("svg");
-
-// draw one frame and update the readout
-function render() {
-  frame();
-  const active = hover ?? pinned;
-  out.innerHTML = active === null ? "" : geo.counts[active] + "<span>" + ((100 * geo.counts[active]) / geo.total).toFixed(1) + "% of " + geo.total + "</span>";
-}
-
-// ---- motion: idle spin, drag with momentum ----
-const still = matchMedia("(prefers-reduced-motion: reduce)");
-let spin = !still.matches, vel = 0, last = 0, raf = 0, idleTimer = 0;
-function loop(now) {
-  const dt = last ? Math.min((now - last) / 1000, 1 / 20) : 1 / 60; last = now;
-  if (!dragging) {
-    if (Math.abs(vel) > 0.01) { yaw += vel * dt; vel *= Math.exp(-dt * 3); }
-    else if (spin) yaw += 0.35 * dt;
-  }
-  render();
-  raf = (spin || dragging || Math.abs(vel) > 0.01) ? requestAnimationFrame(loop) : 0;
-}
-const kick = () => { if (!raf) { last = 0; raf = requestAnimationFrame(loop); } };
-const pause = () => { spin = false; clearTimeout(idleTimer); idleTimer = setTimeout(() => { if (!still.matches) { spin = true; kick(); } }, 5000); };
-
-let dragging = false, moved = 0, sx = 0, sy = 0, lastX = 0, lastT = 0;
-svg.addEventListener("pointerdown", (e) => {
-  dragging = true; moved = 0; sx = lastX = e.clientX; sy = e.clientY; lastT = performance.now(); vel = 0;
-  svg.setPointerCapture(e.pointerId); svg.classList.add("dragging"); pause(); kick();
-});
-svg.addEventListener("pointermove", (e) => {
-  if (dragging) {
-    const box = svg.getBoundingClientRect(), scale = W / box.width;
-    const dx = e.clientX - lastX, now = performance.now();
-    moved += Math.abs(dx) + Math.abs(e.movementY || 0);
-    yaw -= (dx * scale) / R;
-    vel = (-(dx * scale) / R) / Math.max(0.008, (now - lastT) / 1000);
-    if (e.pointerType === "mouse") tilt = Math.min(40, Math.max(4, tilt + (e.movementY || 0) * 0.25));
-    lastX = e.clientX; lastT = now;
-    return;
-  }
-  if (e.pointerType !== "mouse") return;
-  const el = e.target.closest(".band,.label");
-  const i = el ? +el.dataset.i : null;
-  if (i !== hover) { hover = i; render(); }
-});
-const end = (e) => {
-  if (!dragging) return;
-  dragging = false; svg.classList.remove("dragging");
-  if (performance.now() - lastT > 80) vel = 0;
-  if (moved < 6) {              // a tap or click, not a drag: select the band under the pointer
-    const el = document.elementFromPoint(e.clientX, e.clientY)?.closest(".band,.label");
-    const i = el ? +el.dataset.i : null;
-    pinned = i === null || pinned === i ? null : i;
-    hover = null;
-  }
-  render(); kick();
+// ---------- settings (overridden by numbers.csv) ----------
+const DEFAULTS = {
+  villas_per_quarter: 50,
+  cement_tonnes_per_villa: 40,
+  steel_tonnes_per_villa: 12,
+  bricks_thousand_per_villa: 18,
+  glass_m2_per_villa: 60,
 };
-svg.addEventListener("pointerup", end);
-svg.addEventListener("pointercancel", end);
-svg.addEventListener("pointerleave", (e) => { if (!dragging && hover !== null) { hover = null; render(); } });
-svg.addEventListener("keydown", (e) => {
-  const k = e.key;
-  if (k === "ArrowLeft") yaw += 0.15; else if (k === "ArrowRight") yaw -= 0.15;
-  else if (k === "ArrowUp") tilt = Math.min(40, tilt + 3); else if (k === "ArrowDown") tilt = Math.max(4, tilt - 3);
-  else if (k === "Enter" || k === " ") pinned = pinned === null ? 0 : (pinned + 1) % geo.counts.length;
-  else if (k === "Escape") pinned = null;
-  else return;
-  e.preventDefault(); pause(); render();
-});
+let CFG = { ...DEFAULTS };
 
-// ---- numbers from numbers.csv: every positive number in the second column, top to bottom ----
-async function loadNumbers() {
-  try {
-    const res = await fetch(DATA_FILE + "?v=" + Date.now(), { cache: "no-store" });
-    if (!res.ok) return null;
-    const text = (await res.text()).replace(/^﻿/, "");
-    const nums = [];
-    for (const line of text.split(/\r?\n/)) {
-      const cells = line.split(/[,;\t]/).map((c) => c.trim().replace(/^"|"$/g, ""));
-      if (cells.length < 2 || cells[0].toLowerCase() === "total") continue;
-      const v = Number(cells[1]);
-      if (cells[1] !== "" && isFinite(v) && v > 0) nums.push(v);
+const MATERIALS = [
+  { key: "cement_tonnes_per_villa", name: "Cement", unit: "t", stage: 0, color: "#b9a7d9" },
+  { key: "steel_tonnes_per_villa", name: "Steel", unit: "t", stage: 1, color: "#8b7fa8" },
+  { key: "bricks_thousand_per_villa", name: "Bricks", unit: "k", stage: 2, color: "#c084fc" },
+  { key: "glass_m2_per_villa", name: "Glass", unit: "m²", stage: 3, color: "#a5d8ff" },
+];
+const STAGES = [
+  { name: "Foundation", text: "pours the concrete slab and footings" },
+  { name: "Structure", text: "raises the steel and concrete frame" },
+  { name: "Walls & roof", text: "builds the walls and puts the roof on" },
+  { name: "Finishing", text: "fits windows and doors, paints and landscapes" },
+];
+
+// ---------- isometric drawing ----------
+const C30 = Math.cos(Math.PI / 6);
+const P = (x, y, z = 0) => [(x - y) * C30, (x + y) * 0.5 - z];
+const pts = (list) => list.map((p) => { const q = P(...p); return q[0].toFixed(1) + "," + q[1].toFixed(1); }).join(" ");
+const poly = (list, fill, extra = "") => `<polygon points="${pts(list)}" fill="${fill}" stroke="#fff" stroke-width=".8" stroke-linejoin="round" ${extra}/>`;
+// a box with its top and the two faces that face the viewer (+x on the right, +y on the left)
+function box(x, y, z, w, d, h, c) {
+  return poly([[x, y + d, z], [x + w, y + d, z], [x + w, y + d, z + h], [x, y + d, z + h]], c.left) +
+    poly([[x + w, y, z], [x + w, y + d, z], [x + w, y + d, z + h], [x + w, y, z + h]], c.right) +
+    poly([[x, y, z + h], [x + w, y, z + h], [x + w, y + d, z + h], [x, y + d, z + h]], c.top);
+}
+const MACHINE = { top: "#f3ecff", left: "#a982f0", right: "#7c4fd8" };
+const GREY = { top: "#ece8f3", left: "#cfc7de", right: "#b3a8c7" };
+const SLAB = { top: "#e4e0ea", left: "#bdb5cb", right: "#a299b3" };
+const WALL = { top: "#ffffff", left: "#f6f1ff", right: "#e3d6fb" };
+
+// a villa at one of five stages of completion
+function villa(stage, z = 0, s = 1) {
+  const w = 30 * s, d = 30 * s, m = 3 * s;
+  let g = "";
+  if (s === 1) g += box(-2, -2, z, w + 4, d + 4, 2, GREY);                         // pallet
+  const z0 = s === 1 ? z + 2 : z;
+  if (stage >= 1) g += box(0, 0, z0, w, d, 3 * s, SLAB);                          // slab
+  const zb = z0 + 3 * s, hw = 18 * s;
+  if (stage === 2) {
+    // frame: columns at the corners and edge beams on top
+    for (const [x, y] of [[0, 0], [w - m, 0], [0, d - m], [w - m, d - m]]) g += box(x, y, zb, m, m, hw, GREY);
+    g += box(0, 0, zb + hw, w, m, m, GREY) + box(0, d - m, zb + hw, w, m, m, GREY) + box(0, 0, zb + hw, m, d, m, GREY) + box(w - m, 0, zb + hw, m, d, m, GREY);
+  }
+  if (stage >= 3) {
+    g += box(0, 0, zb, w, d, hw, WALL);
+    const zr = zb + hw, rh = 11 * s, o = 2 * s;
+    const roof = stage >= 4 ? "#7c3aed" : "#b9a2e6", roofB = stage >= 4 ? "#5b21b6" : "#9d86cf";
+    g += poly([[-o, -o, zr], [w + o, -o, zr], [w + o, d / 2, zr + rh], [-o, d / 2, zr + rh]], roofB);
+    g += poly([[-o, d / 2, zr + rh], [w + o, d / 2, zr + rh], [w + o, d + o, zr], [-o, d + o, zr]], roof);
+    g += poly([[w, 0, zr], [w, d, zr], [w, d / 2, zr + rh]], WALL.right);
+    if (stage >= 4) {
+      const win = "#a5d8ff";
+      g += poly([[6 * s, d, zb + 6 * s], [12 * s, d, zb + 6 * s], [12 * s, d, zb + 13 * s], [6 * s, d, zb + 13 * s]], win);
+      g += poly([[18 * s, d, zb], [24 * s, d, zb], [24 * s, d, zb + 12 * s], [18 * s, d, zb + 12 * s]], "#5b21b6");
+      g += poly([[w, 7 * s, zb + 6 * s], [w, 14 * s, zb + 6 * s], [w, 14 * s, zb + 13 * s], [w, 7 * s, zb + 13 * s]], win);
+      g += poly([[w, 18 * s, zb + 6 * s], [w, 25 * s, zb + 6 * s], [w, 25 * s, zb + 13 * s], [w, 18 * s, zb + 13 * s]], win);
     }
-    return nums.length ? nums : null;
-  } catch { return null; }
+  }
+  return g;
 }
 
-setup(COUNTS); render(); kick();
-loadNumbers().then((nums) => { if (nums && nums.join() !== COUNTS.join()) { COUNTS = nums; pinned = hover = null; setup(COUNTS); render(); } });
+// ---------- layout (world units) ----------
+const BELT = { x0: -40, x1: 600, y: 0, d: 34, h: 8 };
+const MX = [110, 240, 370, 500], MW = 74;              // machine centres along the belt
+const HOP = { y: -118, d: 40, w: 40, z: 64, h: 52 };   // hoppers on stands behind each machine
+const LOT = { x: 660, y: -70, gap: 24, cols: 10 };
+const SPEED = 70;                                      // belt speed, world units per second at 1×
+
+const svg = document.getElementById("scene");
+let lotsN = 50;
+
+function lotPos(i) {
+  const c = i % LOT.cols, r = Math.floor(i / LOT.cols);
+  return [LOT.x + c * LOT.gap, LOT.y + r * LOT.gap];
+}
+
+function shade(hex, k) {
+  const n = parseInt(hex.slice(1), 16), c = [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((v) => Math.round(k < 0 ? v * (1 + k) : v + (255 - v) * k));
+  return "#" + c.map((v) => v.toString(16).padStart(2, "0")).join("");
+}
+
+function textOn(x, y, z, str, size, color, anchor = "middle") {
+  const p = P(x, y, z);
+  return `<text x="${p[0].toFixed(1)}" y="${p[1].toFixed(1)}" font-size="${size}" font-weight="700" fill="${color}" text-anchor="${anchor}" transform="rotate(26.6 ${p[0].toFixed(1)} ${p[1].toFixed(1)})">${str}</text>`;
+}
+
+function buildScene() {
+  lotsN = Math.max(1, Math.min(120, Math.round(CFG.villas_per_quarter)));
+  const rows = Math.ceil(lotsN / LOT.cols);
+  const groundX1 = LOT.x + LOT.cols * LOT.gap + 30, groundY1 = Math.max(80, LOT.y + rows * LOT.gap + 40);
+  let back = "", front = "";
+  back += box(-80, -160, -8, groundX1 + 80, groundY1 + 160, 8, { top: "#faf7ff", left: "#ece4fb", right: "#ddd1f6" });
+  back += poly([[LOT.x - 14, LOT.y - 14, 0], [LOT.x + LOT.cols * LOT.gap + 8, LOT.y - 14, 0], [LOT.x + LOT.cols * LOT.gap + 8, LOT.y + rows * LOT.gap + 8, 0], [LOT.x - 14, LOT.y + rows * LOT.gap + 8, 0]], "#f1ebfd");
+  for (let i = 0; i < lotsN; i++) { const [x, y] = lotPos(i); back += poly([[x, y, 0], [x + 18, y, 0], [x + 18, y + 18, 0], [x, y + 18, 0]], "#e7ddfa"); }
+  // hoppers on stands, with a chute down to the back of their machine
+  MATERIALS.forEach((m, i) => {
+    const cx = MX[m.stage], x = cx - HOP.w / 2, y = HOP.y;
+    let g = "";
+    for (const [lx, ly] of [[x + 3, y + 3], [x + HOP.w - 6, y + 3], [x + 3, y + HOP.d - 6], [x + HOP.w - 6, y + HOP.d - 6]]) g += box(lx, ly, 0, 3, 3, HOP.z, GREY);
+    g += box(x, y, HOP.z, HOP.w, HOP.d, HOP.h, { top: "#f6f0ff", left: m.color, right: shade(m.color, -0.18) });
+    g += `<polygon points="${pts([[x + 10, y + HOP.d, HOP.z + 8], [x + 30, y + HOP.d, HOP.z + 8], [x + 30, y + HOP.d, HOP.z + HOP.h - 8], [x + 10, y + HOP.d, HOP.z + HOP.h - 8]])}" fill="#fff" fill-opacity=".75"/>`;
+    g += `<polygon id="lvl-${i}" fill="${shade(m.color, -0.35)}"/>`;
+    g += poly([[cx - 4, y + HOP.d, HOP.z + 2], [cx + 4, y + HOP.d, HOP.z + 2], [cx + 4, -10, 56], [cx - 4, -10, 56]], "#d9cdf3");
+    const lp = P(x + HOP.w / 2, y + HOP.d / 2, HOP.z + HOP.h + 10);
+    g += `<text x="${lp[0].toFixed(1)}" y="${lp[1].toFixed(1)}" font-size="12" font-weight="700" fill="#4c1d95" text-anchor="middle">${m.name}</text>`;
+    back += `<g class="hot" data-hop="${i}">${g}</g>`;
+  });
+  back += `<g id="drops"></g>`;
+  // conveyor belt
+  back += box(BELT.x0, BELT.y, 0, BELT.x1 - BELT.x0, BELT.d, BELT.h, { top: "#e9e3f3", left: "#bfb3d6", right: "#a597c2" });
+  let rollers = "";
+  for (let x = BELT.x0 + 10; x < BELT.x1; x += 14) { const a = P(x, BELT.y, BELT.h), b = P(x, BELT.y + BELT.d, BELT.h); rollers += `M${a[0].toFixed(1)} ${a[1].toFixed(1)}L${b[0].toFixed(1)} ${b[1].toFixed(1)}`; }
+  back += `<path d="${rollers}" stroke="#d3c9e6" stroke-width="1" fill="none"/>`;
+  // machines: separate groups so villas are drawn in front of or behind them
+  const machines = MX.map((cx, i) => {
+    const x = cx - MW / 2, y = BELT.y - 8, d = BELT.d + 16, h = 64;
+    let g = box(x, y, 0, MW, d, h, MACHINE);
+    g += poly([[x + MW, y + 9, BELT.h], [x + MW, y + d - 9, BELT.h], [x + MW, y + d - 9, 50], [x + MW, y + 9, 50]], "#3b1a7a");
+    const lt = P(x + 10, y + d, h - 9);
+    g += `<circle id="light-${i}" cx="${lt[0].toFixed(1)}" cy="${lt[1].toFixed(1)}" r="3.2" fill="#e9d5ff"/>`;
+    g += textOn(x + MW / 2 - 2, y + d, 22, `${i + 1} ${STAGES[i].name}`, 9.5, "#fff");
+    return `<g class="hot machine" data-stage="${i}" data-depth="${cx}">${g}</g>`;
+  }).join("");
+  front += textOn(LOT.x + (LOT.cols * LOT.gap) / 2, LOT.y + rows * LOT.gap + 28, 0, "Neighbourhood · this quarter", 12, "#4c1d95");
+  front += textOn(BELT.x0 + 26, BELT.y + BELT.d + 18, 0, "Land in", 11, "#7a7090");
+
+  svg.innerHTML = `${back}<g id="line">${machines}</g><g id="lots"></g><g id="fly"></g>${front}`;
+  const bb = svg.getBBox();
+  svg.setAttribute("viewBox", `${(bb.x - 12).toFixed(0)} ${(bb.y - 12).toFixed(0)} ${(bb.width + 24).toFixed(0)} ${(bb.height + 24).toFixed(0)}`);
+  svg.querySelectorAll("[data-stage]").forEach((el) => el.addEventListener("pointerenter", () => tell("stage", +el.dataset.stage)));
+  svg.querySelectorAll("[data-hop]").forEach((el) => el.addEventListener("pointerenter", () => tell("hop", +el.dataset.hop)));
+  svg.addEventListener("pointerleave", () => tell(null));
+  drawLots();
+}
+
+// ---------- simulation ----------
+let villas = [];           // on the belt
+let flying = [];           // from the belt end to their lot
+let delivered = 0, quarter = 1, history = [];
+let speed = 1, running = true, spawnClock = 0, last = 0, drops = [];
+const SPAWN_GAP = 1.15;    // seconds between villas at 1×
+
+function stageAt(x) { let s = 0; MX.forEach((cx) => { if (x > cx + MW / 2 - 30) s++; }); return s; }
+function inside(x) { return MX.some((cx) => x + 30 > cx - MW / 2 + 2 && x < cx + MW / 2 - 2); }
+
+function spawn() {
+  const el = document.createElementNS("http://www.w3.org/2000/svg", "g");
+  el.innerHTML = villa(0);
+  villas.push({ x: BELT.x0 + 4, stage: 0, el, fed: [false, false, false, false] });
+}
+
+function dropMaterial(i) {
+  const m = MATERIALS[i], cx = MX[m.stage];
+  const el = document.createElementNS("http://www.w3.org/2000/svg", "g");
+  el.innerHTML = box(-4, -4, 0, 8, 8, 6, { top: shade(m.color, 0.4), left: m.color, right: shade(m.color, -0.2) });
+  document.getElementById("drops").appendChild(el);
+  drops.push({ el, t: 0, cx });
+}
+
+function drawLots() {
+  const n = Math.min(delivered, lotsN);
+  const order = [...Array(n).keys()].sort((a, b) => { const [ax, ay] = lotPos(a), [bx, by] = lotPos(b); return ax + ay - (bx + by); });
+  document.getElementById("lots").innerHTML = order.map((i) => {
+    const [x, y] = lotPos(i), p = P(x + 1, y + 1, 0);
+    return `<g transform="translate(${p[0].toFixed(1)} ${p[1].toFixed(1)})">${villa(4, 0, 0.55)}</g>`;
+  }).join("");
+}
+
+function step(dt) {
+  spawnClock += dt;
+  const room = !villas.length || villas[villas.length - 1].x > BELT.x0 + 50;
+  if (spawnClock >= SPAWN_GAP && room) { spawnClock = 0; spawn(); }
+  const line = document.getElementById("line");
+  for (const v of villas) {
+    v.x += SPEED * dt;
+    const s = stageAt(v.x);
+    if (s !== v.stage) { v.stage = s; v.el.innerHTML = villa(s); }
+    MX.forEach((cx, i) => { if (!v.fed[i] && v.x + 30 > cx - MW / 2) { v.fed[i] = true; dropMaterial(i); flashT[i] = 0.5; } });
+    if (!v.el.parentNode) line.appendChild(v.el);
+    const p = P(v.x, BELT.y + 2, BELT.h);
+    v.el.setAttribute("transform", `translate(${p[0].toFixed(1)} ${p[1].toFixed(1)})`);
+    v.el.style.opacity = inside(v.x) ? 0 : 1;
+    v.el.dataset.depth = v.x + 15;
+  }
+  // painter's order along the line
+  const kids = [...line.children].sort((a, b) => +a.dataset.depth - +b.dataset.depth);
+  kids.forEach((el, i) => { if (line.children[i] !== el) line.insertBefore(el, line.children[i]); });
+  // off the end of the belt: lift and fly to the next free lot
+  while (villas.length && villas[0].x > BELT.x1 - 10) {
+    const v = villas.shift();
+    v.el.remove();
+    const target = (delivered + flying.length) % lotsN;
+    const el = document.createElementNS("http://www.w3.org/2000/svg", "g");
+    el.innerHTML = villa(4, 0, 0.55);
+    document.getElementById("fly").appendChild(el);
+    flying.push({ el, t: 0, from: [BELT.x1 - 6, BELT.y + 6], to: lotPos(target) });
+  }
+  for (const f of flying) {
+    f.t = Math.min(1, f.t + dt / 0.9);
+    const e = f.t < 0.5 ? 2 * f.t * f.t : 1 - Math.pow(-2 * f.t + 2, 2) / 2;
+    const x = f.from[0] + (f.to[0] + 1 - f.from[0]) * e, y = f.from[1] + (f.to[1] + 1 - f.from[1]) * e, z = BELT.h * (1 - e) + Math.sin(Math.PI * f.t) * 40;
+    const p = P(x, y, z);
+    f.el.setAttribute("transform", `translate(${p[0].toFixed(1)} ${p[1].toFixed(1)})`);
+  }
+  while (flying.length && flying[0].t >= 1) { flying.shift().el.remove(); land(); }
+  for (const d of drops) {
+    d.t += dt / 0.7;
+    const t = Math.min(1, d.t), y = HOP.y + HOP.d + (-10 - (HOP.y + HOP.d)) * t, z = HOP.z + 6 + (56 - HOP.z - 2) * t;
+    const p = P(d.cx, y, z);
+    d.el.setAttribute("transform", `translate(${p[0].toFixed(1)} ${p[1].toFixed(1)})`);
+  }
+  drops = drops.filter((d) => (d.t < 1 ? true : (d.el.remove(), false)));
+}
+
+function land() {
+  delivered++;
+  if (delivered >= lotsN) {
+    drawLots();
+    history.push({ q: quarter, n: delivered });
+    quarter++;
+    delivered = 0;
+    setTimeout(drawLots, 800);
+  } else drawLots();
+  updateHud();
+}
+
+let flashT = [0, 0, 0, 0];
+const fmt = (n) => (Math.round(n * 10) / 10).toLocaleString();
+const yearOf = (q) => Math.ceil(q / 4), qOf = (q) => ((q - 1) % 4) + 1;
+
+function updateHud() {
+  document.getElementById("count").textContent = `${delivered} / ${lotsN}`;
+  document.getElementById("qlabel").textContent = `villas delivered · Year ${yearOf(quarter)}, Q${qOf(quarter)} · day ${Math.round((delivered / lotsN) * 90)} of 90`;
+  const chips = history.slice(-7).map((h) => `<span class="q done">Y${yearOf(h.q)} Q${qOf(h.q)} · ${h.n} ✓</span>`).join("");
+  document.getElementById("quarters").innerHTML = chips + `<span class="q now">Y${yearOf(quarter)} Q${qOf(quarter)} · in progress</span>`;
+  MATERIALS.forEach((m, i) => {
+    const per = +CFG[m.key] || 0, used = per * delivered, total = per * lotsN;
+    const el = document.getElementById("mat-" + i);
+    el.querySelector(".val").innerHTML = `${fmt(used)}<small>${m.unit} of ${fmt(total)} ${m.unit}</small>`;
+    el.querySelector(".bar i").style.width = (total ? (100 * used) / total : 0) + "%";
+    // the hopper empties through the quarter and refills when a new one starts
+    const left = 1 - delivered / lotsN, x = MX[m.stage] - HOP.w / 2, y = HOP.y;
+    const zt = HOP.z + 8 + (HOP.h - 16) * left;
+    document.getElementById("lvl-" + i)?.setAttribute("points", pts([[x + 10, y + HOP.d, HOP.z + 8], [x + 30, y + HOP.d, HOP.z + 8], [x + 30, y + HOP.d, zt], [x + 10, y + HOP.d, zt]]));
+  });
+}
+
+function buildMaterials() {
+  document.getElementById("materials").innerHTML = MATERIALS.map((m, i) =>
+    `<div class="mat" id="mat-${i}"><span class="name">${m.name} used this quarter</span><span class="val"></span><div class="bar"><i></i></div></div>`).join("");
+}
+
+const info = document.getElementById("info");
+function tell(kind, i) {
+  if (kind === "stage") {
+    const s = STAGES[i], m = MATERIALS.find((mm) => mm.stage === i);
+    info.innerHTML = `<b>${i + 1}. ${s.name}</b> ${s.text}. Uses ${fmt(+CFG[m.key])} ${m.unit} of ${m.name.toLowerCase()} per villa.`;
+  } else if (kind === "hop") {
+    const m = MATERIALS[i];
+    info.innerHTML = `<b>${m.name}</b> feeds stage ${m.stage + 1}, ${STAGES[m.stage].name}: ${fmt(+CFG[m.key])} ${m.unit} per villa, ${fmt(CFG[m.key] * lotsN)} ${m.unit} per quarter.`;
+  } else info.textContent = "Hover a machine or a hopper to see what it does.";
+}
+
+// ---------- loop and controls ----------
+const still = matchMedia("(prefers-reduced-motion: reduce)");
+function loop(now) {
+  const dt = last ? Math.min((now - last) / 1000, 0.05) : 0; last = now;
+  if (running) {
+    step(dt * speed);
+    flashT = flashT.map((t, i) => { const v = Math.max(0, t - dt); document.getElementById("light-" + i)?.setAttribute("fill", v > 0 ? "#f0abfc" : "#e9d5ff"); return v; });
+  }
+  requestAnimationFrame(loop);
+}
+document.getElementById("play").addEventListener("click", (e) => {
+  running = !running; e.target.textContent = running ? "Pause" : "Play";
+  e.target.classList.toggle("on", running); e.target.setAttribute("aria-pressed", running);
+});
+document.querySelectorAll("[data-speed]").forEach((b) => b.addEventListener("click", () => {
+  speed = +b.dataset.speed;
+  document.querySelectorAll("[data-speed]").forEach((x) => x.classList.toggle("on", x === b));
+}));
+
+// ---------- numbers.csv: setting,value ----------
+async function loadSettings() {
+  try {
+    const res = await fetch("numbers.csv?v=" + Date.now(), { cache: "no-store" });
+    if (!res.ok) return;
+    const text = (await res.text()).replace(/^﻿/, "");
+    for (const line of text.split(/\r?\n/)) {
+      const [k, v] = line.split(/[,;\t]/).map((c) => (c || "").trim().replace(/^"|"$/g, ""));
+      if (k && k in DEFAULTS && v !== "" && isFinite(+v) && +v >= 0) CFG[k] = +v;
+    }
+  } catch {}
+}
+
+buildMaterials();
+loadSettings().finally(() => {
+  buildScene();
+  updateHud();
+  if (still.matches) { running = false; const b = document.getElementById("play"); b.textContent = "Play"; b.classList.remove("on"); }
+  requestAnimationFrame(loop);
+});
 </script>
 </body>
 </html>
